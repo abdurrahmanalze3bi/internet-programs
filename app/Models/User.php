@@ -6,6 +6,7 @@ namespace App\Models;
 use App\Models\Complaint;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Spatie\Activitylog\LogOptions;
 use Tymon\JWTAuth\Contracts\JWTSubject;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -172,5 +173,21 @@ class User extends Authenticatable implements JWTSubject
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
+    }
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly([
+                'first_name',
+                'last_name',
+                'email',
+                'role',
+                'entity_id',
+                'is_active',
+                'email_verified_at'
+            ])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->setDescriptionForEvent(fn(string $eventName) => "User {$this->full_name} ({$this->email}) was {$eventName}");
     }
 }

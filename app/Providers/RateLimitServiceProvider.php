@@ -1,4 +1,5 @@
 <?php
+// app/Providers/RateLimitServiceProvider.php
 
 namespace App\Providers;
 
@@ -6,6 +7,7 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use App\Services\RateLimitControlService;
 
 class RateLimitServiceProvider extends ServiceProvider
 {
@@ -20,100 +22,118 @@ class RateLimitServiceProvider extends ServiceProvider
     /**
      * Bootstrap services.
      */
-    // app/Providers/RateLimitServiceProvider.php
-
     public function boot(): void
     {
+        $rateLimitControl = app(RateLimitControlService::class);
+
+        // ============================================
+        // GLOBAL API RATE LIMIT
+        // ============================================
+        RateLimiter::for('api', function (Request $request) use ($rateLimitControl) {
+            if (!$rateLimitControl->isEnabled()) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip())
+                ->response(function (Request $request, array $headers) {
+                    return response()->json([
+                        'message' => 'Too many requests. Please slow down.',
+                        'retry_after' => $headers['Retry-After'] ?? 60,
+                    ], 429, $headers);
+                });
+        });
+
         // ============================================
         // AUTHENTICATION RATE LIMITS
         // ============================================
 
-        // Registration - INDUSTRY STANDARD APPROACH
-        RateLimiter::for('register', function (Request $request) {
-            $email = (string) $request->input('email', '');
+        // Login attempts - strict limit
+        RateLimiter::for('login', function (Request $request) use ($rateLimitControl) {
+            if (!$rateLimitControl->isEnabled()) {
+                return Limit::none();
+            }
+
+            $email = (string) $request->email;
 
             return [
-                // ✅ Per IP: Allow up to 10 registrations per hour
-                // (Allows multiple legitimate users from same location)
-                Limit::perHour(10)->by($request->ip())->response(function () {
+                // By email: 5 attempts per 5 minutes
+                Limit::perMinutes(5, 5)->by($email)->response(function () {
                     return response()->json([
-                        'message' => 'Too many registration attempts from this location. Please try again later.',
-                        'retry_after' => 3600,
+                        'message' => 'Too many login attempts. Please try again in 5 minutes.',
+                        'retry_after' => 300,
                     ], 429);
                 }),
-
-                // ✅ Per Email: Prevent duplicate/spam email attempts
-                // If same email tries multiple times, block it
-                Limit::perHour(3)->by($email)->response(function () {
-                    return response()->json([
-                        'message' => 'This email has been used too many times. Please try again later.',
-                        'retry_after' => 3600,
-                    ], 429);
-                }),
+                // By IP: 10 attempts per 5 minutes
+                Limit::perMinutes(5, 10)->by($request->ip()),
             ];
         });
 
-        // Login - Already good, but let's optimize
-        RateLimiter::for('login', function (Request $request) {
-            $email = (string) $request->input('email', '');
+        // Registration - prevent spam accounts
+        RateLimiter::for('register', function (Request $request) use ($rateLimitControl) {
+            if (!$rateLimitControl->isEnabled()) {
+                return Limit::none();
+            }
 
             return [
-                // Per email: Prevent brute force on specific account
-                Limit::perMinutes(5, 5)->by($email)->response(function () {
+                // By IP: 3 registrations per hour
+                Limit::perHour(3)->by($request->ip())->response(function () {
                     return response()->json([
-                        'message' => 'Too many login attempts for this account. Please try again in 5 minutes.',
-                        'retry_after' => 300,
-                    ], 429);
-                }),
-
-                // Per IP: Prevent distributed brute force
-                Limit::perMinutes(5, 20)->by($request->ip())->response(function () {
-                    return response()->json([
-                        'message' => 'Too many login attempts from this location. Please try again later.',
-                        'retry_after' => 300,
+                        'message' => 'Too many registration attempts. Please try again later.',
+                        'retry_after' => 3600,
                     ], 429);
                 }),
             ];
         });
 
         // Email verification resend
-        RateLimiter::for('email-verification', function (Request $request) {
-            return Limit::perMinute(3)->by($request->user()?->id ?: $request->ip())
+        RateLimiter::for('email-verification', function (Request $request) use ($rateLimitControl) {
+            if (!$rateLimitControl->isEnabled()) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(2)->by($request->user()?->id ?: $request->ip())
                 ->response(function () {
                     return response()->json([
-                        'message' => 'Too many verification requests. Please wait before requesting another.',
+                        'message' => 'Too many verification emails sent. Please wait.',
                         'retry_after' => 60,
                     ], 429);
                 });
         });
 
         // ============================================
-        // COMPLAINT RATE LIMITS
+        // COMPLAINT CREATION RATE LIMITS
         // ============================================
 
-        // Create complaint - Allow reasonable usage
-        RateLimiter::for('create-complaint', function (Request $request) {
+        // Prevent complaint spam
+        RateLimiter::for('create-complaint', function (Request $request) use ($rateLimitControl) {
+            if (!$rateLimitControl->isEnabled()) {
+                return Limit::none();
+            }
+
             return [
-                // Per user: 10 complaints per hour (increased from 5)
+                // Per user: 10 complaints per hour
                 Limit::perHour(10)->by($request->user()->id)->response(function () {
                     return response()->json([
-                        'message' => 'You have reached the hourly complaint limit. Please try again later.',
+                        'message' => 'You have reached the maximum complaints per hour.',
                         'retry_after' => 3600,
                     ], 429);
                 }),
-
-                // Per user: 30 complaints per day (increased from 20)
+                // Per user: 30 complaints per day
                 Limit::perDay(30)->by($request->user()->id)->response(function () {
                     return response()->json([
-                        'message' => 'You have reached the daily complaint limit. Please try again tomorrow.',
+                        'message' => 'You have reached the daily complaint limit.',
                         'retry_after' => 86400,
                     ], 429);
                 }),
             ];
         });
 
-        // Update complaint - Reasonable limit
-        RateLimiter::for('update-complaint', function (Request $request) {
+        // Complaint updates
+        RateLimiter::for('update-complaint', function (Request $request) use ($rateLimitControl) {
+            if (!$rateLimitControl->isEnabled()) {
+                return Limit::none();
+            }
+
             return Limit::perMinute(15)->by($request->user()->id)
                 ->response(function () {
                     return response()->json([
@@ -123,12 +143,16 @@ class RateLimitServiceProvider extends ServiceProvider
                 });
         });
 
-        // File upload - Prevent abuse
-        RateLimiter::for('file-upload', function (Request $request) {
-            return Limit::perMinute(20)->by($request->user()->id)
+        // File uploads - prevent storage abuse
+        RateLimiter::for('file-upload', function (Request $request) use ($rateLimitControl) {
+            if (!$rateLimitControl->isEnabled()) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(10)->by($request->user()->id)
                 ->response(function () {
                     return response()->json([
-                        'message' => 'Too many file operations. Please wait before trying again.',
+                        'message' => 'Too many file operations. Please wait.',
                         'retry_after' => 60,
                     ], 429);
                 });
@@ -138,8 +162,13 @@ class RateLimitServiceProvider extends ServiceProvider
         // EMPLOYEE RATE LIMITS
         // ============================================
 
-        RateLimiter::for('employee-actions', function (Request $request) {
-            return Limit::perMinute(60)->by($request->user()->id)
+        // Employee actions (accepting, finishing complaints)
+        RateLimiter::for('employee-actions', function (Request $request) use ($rateLimitControl) {
+            if (!$rateLimitControl->isEnabled()) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(30)->by($request->user()->id)
                 ->response(function () {
                     return response()->json([
                         'message' => 'Too many actions performed. Please slow down.',
@@ -149,50 +178,45 @@ class RateLimitServiceProvider extends ServiceProvider
         });
 
         // ============================================
-        // ADMIN RATE LIMITS (Higher)
+        // ADMIN RATE LIMITS
         // ============================================
 
-        RateLimiter::for('admin-api', function (Request $request) {
-            return Limit::perMinute(200)->by($request->user()->id);
+        // Admin has higher limits
+        RateLimiter::for('admin-api', function (Request $request) use ($rateLimitControl) {
+            if (!$rateLimitControl->isEnabled()) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(120)->by($request->user()->id);
         });
 
         // ============================================
-        // GENERAL API RATE LIMIT
+        // FCM TOKEN REGISTRATION
         // ============================================
 
-        RateLimiter::for('api', function (Request $request) {
-            return Limit::perMinute(120)->by($request->user()?->id ?: $request->ip())
-                ->response(function (Request $request, array $headers) {
-                    return response()->json([
-                        'message' => 'Too many requests. Please slow down.',
-                        'retry_after' => $headers['Retry-After'] ?? 60,
-                    ], 429, $headers);
-                });
+        RateLimiter::for('fcm-register', function (Request $request) use ($rateLimitControl) {
+            if (!$rateLimitControl->isEnabled()) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(5)->by($request->user()->id);
         });
 
-        // Public tracking (no auth required)
-        RateLimiter::for('public-track', function (Request $request) {
-            return Limit::perMinute(20)->by($request->ip())
+        // ============================================
+        // PUBLIC ENDPOINTS
+        // ============================================
+
+        // Tracking complaints by tracking number (public)
+        RateLimiter::for('public-track', function (Request $request) use ($rateLimitControl) {
+            if (!$rateLimitControl->isEnabled()) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(10)->by($request->ip())
                 ->response(function () {
                     return response()->json([
                         'message' => 'Too many tracking requests. Please try again later.',
                         'retry_after' => 60,
-                    ], 429);
-                });
-        });
-
-        // FCM token registration
-        RateLimiter::for('fcm-register', function (Request $request) {
-            return Limit::perMinute(10)->by($request->user()->id);
-        });
-
-        // Password reset
-        RateLimiter::for('password-reset', function (Request $request) {
-            return Limit::perHour(3)->by($request->input('email', ''))
-                ->response(function () {
-                    return response()->json([
-                        'message' => 'Too many password reset attempts. Please try again later.',
-                        'retry_after' => 3600,
                     ], 429);
                 });
         });

@@ -202,4 +202,23 @@ class Complaint extends Model
                 ->orWhere('lock_expires_at', '<', now());
         });
     }
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly([
+                'tracking_number',
+                'status',
+                'assigned_to',
+                'complaint_kind',
+                'description',
+                'location',
+                'info_requested',
+                'resolution',
+                'admin_notes',
+                'resolved_at'
+            ])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->setDescriptionForEvent(fn(string $eventName) => "Complaint {$this->tracking_number} was {$eventName}");
+    }
 }

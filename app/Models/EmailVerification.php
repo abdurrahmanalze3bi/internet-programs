@@ -6,6 +6,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Carbon\Carbon;
+use Spatie\Activitylog\LogOptions;
 
 class EmailVerification extends Model
 {
@@ -59,5 +60,18 @@ class EmailVerification extends Model
     public static function generateCode(): string
     {
         return str_pad((string) random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+    }
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly([
+                'user_id',
+                'code',
+                'is_used',
+                'expires_at'
+            ])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->setDescriptionForEvent(fn(string $eventName) => "Email verification for user {$this->user_id} was {$eventName}");
     }
 }

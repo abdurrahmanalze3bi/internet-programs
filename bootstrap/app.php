@@ -6,14 +6,17 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Console\Scheduling\Schedule; // ← Add this
 
 return Application::configure(basePath: dirname(__DIR__))
+
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->trustProxies(
             at: '*',
@@ -22,23 +25,34 @@ return Application::configure(basePath: dirname(__DIR__))
             Request::HEADER_X_FORWARDED_PORT |
             Request::HEADER_X_FORWARDED_PROTO
         );
-        // Register middleware aliases
+        $middleware->api(append: [
+            \App\Http\Middleware\PerformanceMonitoringMiddleware::class,
+        ]);
         $middleware->append(\App\Http\Middleware\BlockSuspiciousIps::class);
+
         $middleware->alias([
             'admin' => \App\Http\Middleware\AdminMiddleware::class,
             'employee' => \App\Http\Middleware\EmployeeMiddleware::class,
-
         ]);
 
-        // Configure API rate limiting
         $middleware->api(prepend: [
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ]);
 
-        // ✅ NEW: Configure throttle middleware
         $middleware->throttleApi();
     })
+
+    /*
+    |--------------------------------------------------------------------------
+    | 📌 Add your scheduler here
+    |--------------------------------------------------------------------------
+    */
+    ->withSchedule(function (Schedule $schedule) {
+        $schedule->command('backup:database')->dailyAt('02:00');
+    })
+
     ->withExceptions(function (Exceptions $exceptions) {
         //
     })
+
     ->create();

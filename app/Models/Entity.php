@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Spatie\Activitylog\LogOptions;
 
 class Entity extends Model
 {
@@ -75,5 +76,23 @@ class Entity extends Model
     public function getEmployeesCountAttribute(): int
     {
         return $this->employees()->count();
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly([
+                'name',
+                'name_ar',
+                'email',
+                'phone',
+                'description',
+                'description_ar',
+                'type',
+                'is_active'
+            ])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->setDescriptionForEvent(fn(string $eventName) => "Entity {$this->name} was {$eventName}");
     }
 }

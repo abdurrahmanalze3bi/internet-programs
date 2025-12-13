@@ -5,6 +5,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Carbon\Carbon;
+use Spatie\Activitylog\LogOptions;
 
 class PendingRegistration extends Model
 {
@@ -62,5 +63,20 @@ class PendingRegistration extends Model
     public function getFullNameAttribute(): string
     {
         return "{$this->first_name} {$this->last_name}";
+    }
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly([
+                'email',
+                'first_name',
+                'last_name',
+                'role',
+                'is_verified',
+                'expires_at'
+            ])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->setDescriptionForEvent(fn(string $eventName) => "Pending registration for {$this->email} was {$eventName}");
     }
 }

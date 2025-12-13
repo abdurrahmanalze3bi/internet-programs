@@ -5,6 +5,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Spatie\Activitylog\LogOptions;
 
 class RefreshToken extends Model
 {
@@ -41,5 +42,19 @@ class RefreshToken extends Model
     public function isValid(): bool
     {
         return !$this->is_revoked && !$this->isExpired();
+    }
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly([
+                'user_id',
+                'is_revoked',
+                'expires_at',
+                'device_name',
+                'ip_address'
+            ])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->setDescriptionForEvent(fn(string $eventName) => "Refresh token for user {$this->user_id} was {$eventName}");
     }
 }

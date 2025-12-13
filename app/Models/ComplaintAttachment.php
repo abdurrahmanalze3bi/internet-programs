@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
+use Spatie\Activitylog\LogOptions;
 
 class ComplaintAttachment extends Model
 {
@@ -62,5 +63,20 @@ class ComplaintAttachment extends Model
         static::deleted(function ($attachment) {
             Storage::delete($attachment->file_path);
         });
+    }
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly([
+                'complaint_id',
+                'file_name',
+                'file_path',
+                'file_type',
+                'mime_type',
+                'file_size'
+            ])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->setDescriptionForEvent(fn(string $eventName) => "Attachment {$this->file_name} for complaint {$this->complaint_id} was {$eventName}");
     }
 }

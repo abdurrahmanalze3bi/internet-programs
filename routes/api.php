@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\EmployeeController;
 use App\Http\Controllers\Admin\RateLimitController;
+use App\Http\Controllers\Admin\StatisticsController;
 use App\Http\Controllers\ComplaintController;
 use App\Http\Controllers\Employee\ComplaintController as EmployeeComplaintController;
 use App\Http\Controllers\FcmTokenController;
@@ -125,18 +126,49 @@ Route::prefix('employee')->middleware(['auth:api', 'employee', 'throttle:employe
 // ADMIN ROUTES (Higher Limits)
 // ============================================
 
+// Public download endpoint (needs to be outside auth middleware)
+Route::get('/admin/statistics/download/{filename}', [StatisticsController::class, 'download'])
+    ->where('filename', '[a-zA-Z0-9_\-\.]+');
+
+// Admin login (public)
 Route::prefix('admin/auth')->group(function () {
-    // Admin login - same as regular login
     Route::post('/login', [AdminAuthController::class, 'login'])
         ->middleware('throttle:login');
 });
 
+// Protected admin routes
 Route::prefix('admin')->middleware(['auth:api', 'admin', 'throttle:admin-api'])->group(function () {
 
     // Admin Auth
     Route::post('/auth/logout', [AdminAuthController::class, 'logout']);
     Route::get('/auth/me', [AdminAuthController::class, 'me']);
     Route::get('/rate-limits/statistics', [RateLimitController::class, 'statistics']);
+
+    // Statistics & Analytics
+    Route::prefix('statistics')->group(function () {
+        Route::get('/overview', [StatisticsController::class, 'overview']);
+        Route::get('/by-entity', [StatisticsController::class, 'byEntity']);
+        Route::get('/trend', [StatisticsController::class, 'trend']);
+        Route::get('/top-entities', [StatisticsController::class, 'topEntities']);
+
+        // Exports
+        Route::post('/export-csv', [StatisticsController::class, 'exportCsv']);
+        Route::post('/export-pdf', [StatisticsController::class, 'exportPdf']);
+
+        // Activity Log (Versioning)
+        Route::get('/activity-log', [StatisticsController::class, 'activityLog']);
+
+        // Performance Monitoring
+        Route::get('/performance', [StatisticsController::class, 'performance']);
+    });
+
+    // Rate Limiting Control
+    Route::prefix('rate-limiting')->group(function () {
+        Route::get('/status', [StatisticsController::class, 'rateLimitingStatus']);
+        Route::post('/enable', [StatisticsController::class, 'enableRateLimiting']);
+        Route::post('/disable', [StatisticsController::class, 'disableRateLimiting']);
+        Route::post('/toggle', [StatisticsController::class, 'toggleRateLimiting']);
+    });
 
     // Entity Management
     Route::prefix('entities')->group(function () {
@@ -166,9 +198,9 @@ Route::prefix('admin')->middleware(['auth:api', 'admin', 'throttle:admin-api'])-
 Route::get('/server-info', function() {
     return response()->json([
         'server_port' => request()->server('SERVER_PORT'),
-        'server_addr' => request()->server('SERVER_ADDR'),
-        'remote_addr' => request()->ip(),
-        'time' => now()->toDateTimeString(),
-        'random' => rand(1000, 9999),
+        'server_name' => gethostname(),
+        'timestamp' => now()->toDateTimeString(),
+        'random_id' => uniqid('req-'),
+        'message' => 'Load balancing is working!',
     ]);
 });

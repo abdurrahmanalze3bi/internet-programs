@@ -3,7 +3,10 @@
 
 namespace App\Providers;
 
+use App\Repositories\StatisticsRepository;
+use App\Services\Export\ExportService;
 use App\Services\FcmService;
+use App\Services\RateLimitControlService;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 
@@ -39,7 +42,9 @@ class AppServiceProvider extends ServiceProvider
         // ============================================
         // REGISTER REPOSITORIES
         // ============================================
-
+        $this->app->singleton(StatisticsRepository::class);
+        $this->app->singleton(ExportService::class);
+        $this->app->singleton(RateLimitControlService::class);
         $this->app->singleton(UserRepository::class, function ($app) {
             return new UserRepository();
         });
@@ -140,7 +145,8 @@ class AppServiceProvider extends ServiceProvider
                 $app->make(ComplaintRepository::class),
                 $app->make(ComplaintAttachmentRepository::class),
                 $app->make(TrackingNumber::class),
-                $app->make(FileUploadService::class)
+                $app->make(FileUploadService::class),
+
             );
         });
     }
