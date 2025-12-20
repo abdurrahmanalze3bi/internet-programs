@@ -68,9 +68,16 @@ class AuthService
                 new VerifyEmailMail($pendingRegistration)
             );
 
+            $message = 'Registration initiated! A 6-digit verification code has been sent to your email. Please verify to complete registration.';
+
+            // Add bypass hint in development
+            if (config('auth.verification.bypass_enabled', false)) {
+                $message .= ' [DEV MODE: Any 6-digit code will work]';
+            }
+
             return [
                 'email' => $pendingRegistration->email,
-                'message' => 'Registration initiated! A 6-digit verification code has been sent to your email. Please verify to complete registration.',
+                'message' => $message,
             ];
 
         } catch (\Exception $e) {
@@ -88,17 +95,41 @@ class AuthService
      */
     public function verifyEmail(string $email, string $code): array
     {
-        // Find pending registration
-        $pendingRegistration = $this->pendingRegistrationRepository->findByEmailAndCode($email, $code);
+        // Check if bypass mode is enabled
+        $bypassEnabled = config('auth.verification.bypass_enabled', false);
 
-        if (!$pendingRegistration) {
-            throw ValidationException::withMessages([
-                'code' => ['Invalid or expired verification code.']
-            ]);
+        if ($bypassEnabled) {
+            // BYPASS MODE: Accept any 6-digit code
+            // Just find the pending registration by email
+            $pendingRegistration = $this->pendingRegistrationRepository->findByEmail($email);
+
+            if (!$pendingRegistration) {
+                throw ValidationException::withMessages([
+                    'email' => ['No pending registration found for this email.']
+                ]);
+            }
+
+            // Check if code is 6 digits
+            if (!preg_match('/^\d{6}$/', $code)) {
+                throw ValidationException::withMessages([
+                    'code' => ['Verification code must be exactly 6 digits.']
+                ]);
+            }
+
+            // Accept any 6-digit code in bypass mode
+        } else {
+            // NORMAL MODE: Verify the actual code
+            $pendingRegistration = $this->pendingRegistrationRepository->findByEmailAndCode($email, $code);
+
+            if (!$pendingRegistration) {
+                throw ValidationException::withMessages([
+                    'code' => ['Invalid or expired verification code.']
+                ]);
+            }
         }
 
         try {
-            return DB::transaction(function () use ($pendingRegistration) {
+            return DB::transaction(function () use ($pendingRegistration, $bypassEnabled) {
                 // NOW create the actual user with email already verified
                 $user = $this->userRepository->create([
                     'first_name' => $pendingRegistration->first_name,
@@ -115,8 +146,13 @@ class AuthService
                 // Generate tokens
                 $tokens = $this->generateTokensForUser($user);
 
+                $message = 'Email verified successfully! Your account has been created.';
+                if ($bypassEnabled) {
+                    $message .= ' [Verified in DEV MODE]';
+                }
+
                 return [
-                    'message' => 'Email verified successfully! Your account has been created.',
+                    'message' => $message,
                     'user' => $this->formatUserData($user),
                     'tokens' => $tokens,
                 ];

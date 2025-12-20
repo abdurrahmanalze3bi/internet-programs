@@ -12,8 +12,10 @@ return [
     | as required, but they're a perfect start for most applications.
     |
     */
+
     'verification' => [
-        'expire' => 60, // minutes (1 hour)
+        'expire' => env('EMAIL_VERIFICATION_EXPIRE', 60),
+        'bypass_enabled' => env('EMAIL_VERIFICATION_BYPASS', false),
     ],
     // config/auth.php
     'defaults' => [
