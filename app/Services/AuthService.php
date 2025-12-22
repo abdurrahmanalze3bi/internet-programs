@@ -38,6 +38,9 @@ class AuthService
             ]);
         }
 
+        // Check if bypass mode is enabled
+        $bypassEnabled = config('auth.verification.bypass_enabled', false);
+
         // Check if there's already a pending registration
         $existing = $this->pendingRegistrationRepository->findByEmail($data['email']);
         if ($existing && !$existing->isExpired()) {
@@ -63,16 +66,19 @@ class AuthService
                 ),
             ]);
 
-            // Send verification email
-            Mail::to($pendingRegistration->email)->send(
-                new VerifyEmailMail($pendingRegistration)
-            );
+            // Send verification email ONLY if bypass is disabled
+            if (!$bypassEnabled) {
+                Mail::to($pendingRegistration->email)->send(
+                    new VerifyEmailMail($pendingRegistration)
+                );
+            }
 
-            $message = 'Registration initiated! A 6-digit verification code has been sent to your email. Please verify to complete registration.';
+            $message = 'Registration initiated! ';
 
-            // Add bypass hint in development
-            if (config('auth.verification.bypass_enabled', false)) {
-                $message .= ' [DEV MODE: Any 6-digit code will work]';
+            if ($bypassEnabled) {
+                $message .= 'DEVELOPMENT MODE: Use any 6-digit code to verify. Your code is: ' . $pendingRegistration->code;
+            } else {
+                $message .= 'A 6-digit verification code has been sent to your email. Please verify to complete registration.';
             }
 
             return [
@@ -168,6 +174,9 @@ class AuthService
      */
     public function resendVerificationCode(string $email): void
     {
+        // Check if bypass mode is enabled
+        $bypassEnabled = config('auth.verification.bypass_enabled', false);
+
         // Check if user already exists and is verified
         $existingUser = $this->userRepository->findByEmail($email);
         if ($existingUser && $existingUser->hasVerifiedEmail()) {
@@ -202,10 +211,12 @@ class AuthService
                 ),
             ]);
 
-            // Resend email
-            Mail::to($pendingRegistration->email)->send(
-                new VerifyEmailMail($pendingRegistration)
-            );
+            // Resend email ONLY if bypass is disabled
+            if (!$bypassEnabled) {
+                Mail::to($pendingRegistration->email)->send(
+                    new VerifyEmailMail($pendingRegistration)
+                );
+            }
 
         } catch (\Exception $e) {
             throw new \Exception('Failed to resend verification code: ' . $e->getMessage());
