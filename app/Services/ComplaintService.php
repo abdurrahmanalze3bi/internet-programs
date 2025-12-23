@@ -30,6 +30,33 @@ class ComplaintService
     ) {}
 
     /**
+     * Check if notifications should be sent
+     */
+    private function shouldSendNotifications(): bool
+    {
+        // Don't send notifications if:
+        // 1. Email verification is in bypass mode (development)
+        // 2. App is in local/development environment
+        return !config('auth.verification.bypass_enabled', false)
+            && !app()->environment('local');
+    }
+
+    /**
+     * Send notification safely (only if enabled)
+     */
+    private function sendNotification($notifiable, $notification): void
+    {
+        if ($this->shouldSendNotifications()) {
+            $notifiable->notify($notification);
+        } else {
+            Log::info('Notification skipped (dev mode)', [
+                'notification' => get_class($notification),
+                'recipient' => $notifiable->email ?? $notifiable->id,
+            ]);
+        }
+    }
+
+    /**
      * Create a new complaint
      */
     public function createComplaint(array $data, ?array $images = null, ?array $pdfs = null): Complaint
@@ -63,7 +90,9 @@ class ComplaintService
             DB::commit();
 
             event(new ComplaintCreated($complaint));
-            $complaint->user->notify(new ComplaintCreatedNotification($complaint));
+
+            // Send notification only if not in bypass mode
+            $this->sendNotification($complaint->user, new ComplaintCreatedNotification($complaint));
 
             Log::info('Complaint created', ['tracking_number' => $trackingNumber]);
 
@@ -75,6 +104,7 @@ class ComplaintService
             throw $e;
         }
     }
+
     /**
      * Update complaint (only for 'new' or 'declined' status)
      */
@@ -128,6 +158,7 @@ class ComplaintService
             }
 
             // If updating a declined complaint, change status back to 'new'
+            $oldStatus = null;
             if ($complaint->status === 'declined') {
                 $oldStatus = $complaint->status;
                 $updateData['status'] = 'new';
@@ -156,9 +187,12 @@ class ComplaintService
             DB::commit();
 
             // Notify if status changed
-            if (isset($oldStatus) && $oldStatus !== $complaint->status) {
+            if ($oldStatus && $oldStatus !== $complaint->status) {
                 event(new ComplaintStatusChanged($complaint, $oldStatus, $complaint->status));
-                $complaint->user->notify(new ComplaintStatusChangedNotification($complaint, $oldStatus, $complaint->status));
+                $this->sendNotification(
+                    $complaint->user,
+                    new ComplaintStatusChangedNotification($complaint, $oldStatus, $complaint->status)
+                );
             }
 
             Log::info('Complaint updated', [
@@ -220,7 +254,10 @@ class ComplaintService
 
             // Notify citizen
             event(new ComplaintStatusChanged($complaint, $oldStatus, 'in_progress'));
-            $complaint->user->notify(new ComplaintStatusChangedNotification($complaint, $oldStatus, 'in_progress'));
+            $this->sendNotification(
+                $complaint->user,
+                new ComplaintStatusChangedNotification($complaint, $oldStatus, 'in_progress')
+            );
 
             Log::info('Complaint accepted', [
                 'tracking_number' => $complaint->tracking_number,
@@ -274,7 +311,10 @@ class ComplaintService
 
             // Notify citizen
             event(new ComplaintStatusChanged($complaint, $oldStatus, 'finished'));
-            $complaint->user->notify(new ComplaintStatusChangedNotification($complaint, $oldStatus, 'finished'));
+            $this->sendNotification(
+                $complaint->user,
+                new ComplaintStatusChangedNotification($complaint, $oldStatus, 'finished')
+            );
 
             Log::info('Complaint finished', [
                 'tracking_number' => $complaint->tracking_number,
@@ -328,7 +368,10 @@ class ComplaintService
 
             // Notify citizen
             event(new ComplaintStatusChanged($complaint, $oldStatus, 'declined'));
-            $complaint->user->notify(new ComplaintStatusChangedNotification($complaint, $oldStatus, 'declined'));
+            $this->sendNotification(
+                $complaint->user,
+                new ComplaintStatusChangedNotification($complaint, $oldStatus, 'declined')
+            );
 
             Log::info('Complaint declined', [
                 'tracking_number' => $complaint->tracking_number,
@@ -372,7 +415,7 @@ class ComplaintService
             DB::commit();
 
             // Notify citizen
-            $complaint->user->notify(new InfoRequestedNotification($complaint));
+            $this->sendNotification($complaint->user, new InfoRequestedNotification($complaint));
 
             Log::info('Info requested for complaint', [
                 'tracking_number' => $complaint->tracking_number,
